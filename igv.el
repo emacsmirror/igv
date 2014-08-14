@@ -1,4 +1,4 @@
-;; Author: Stefano Barbi <stefanobarbi@gmail.com>
+;; Author: Stefano,. Barbi <stefanobarbi@gmail.com>
 
 (defgroup igv nil "options to customize IGV interaction")
 (defcustom igv-port
@@ -42,7 +42,7 @@
 	  igv-connection
 	(setq igv-connection (make-network-process :name "igv" :host igv-host :service igv-port)))
     (file-error
-     (message "A connection with the server cannot be opened. Please, check that IGV is up and running."))
+     (message "A connection to the server cannot be opened. Please, check that IGV is running."))
     )
 )
 
@@ -50,7 +50,8 @@
   (cond ((igv-check-connection)
 	 (process-send-string igv-connection str)
 	 (message str)
-	 ))
+	 )
+	(t (error "no connection established")))
   )
 
 (defun igv-goto ()
@@ -71,10 +72,34 @@
 	  (igv-send (format "goto %s\n" address))))))
 )
 
+	  ;; (message (format "//variation[@vid=\'%s\']" str)))))))
+
 (defun igv-load-file (filename)
   "tell igv to load a .bam file"
   (interactive "f")
   (igv-send (format "load %s\n" filename)))
+
+(defun igv-sort ()
+  (interactive)
+  (igv-send "sort position")
+  )
+
+(defun igv-load-url (url)
+  "open an url"
+  (interactive "r")
+  (igv-send (format "load %s\n" url))
+  )
+
+(defun igv-load-url-at-point ()
+  "open url at point"
+  (interactive)
+  (let* ((f (thing-at-point 'url)))
+    (if f
+	(igv-send (format "load %s\n" f))
+      (error "malformed url")
+      )
+    )
+  )
 
 (defun igv-load-file-at-point ()
   "tell igv to load the file at point"
@@ -90,3 +115,13 @@
   "take a snapshot of the current portview"
   (interactive "F")
   (igv-send (format "snapshot %s\n" filename)))
+
+(define-minor-mode igv-mode
+  "toggle igv-mode"
+  nil
+  :keymap
+  '(([C-c u] . igv-load-url-at-point)
+    ([C-c g] . igv-goto)
+    )
+  :group 'igv
+  )
