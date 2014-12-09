@@ -1,4 +1,4 @@
-;;; igv.el --- 
+;;; igv.el --- Control Integrative Genomic Viewer within Emacs
 
 ;; Copyright (C) 2014 Stefano Barbi
 ;; Author: Stefano Barbi <stefanobarbi@gmail.com>
@@ -19,13 +19,16 @@
 
 
 ;;; Commentary:
-;;
-;;
-;;
+;; The igv package allows to control remotely an instance of
+;; Interactive Genomics Viewer (IGV).  It can load a track file and position
+;; IGV at a specified location without leaving Emacs.
 
 ;;; Code:
 
-(defgroup igv nil "Options to customize IGV interaction")
+(require 'rx)
+
+(defgroup igv nil
+  "Options to customize IGV interaction")
 
 (defcustom igv-port
   60151
@@ -39,13 +42,25 @@
   :group 'igv :type 'string)
 
 (defcustom igv-path
-  "~/Bioinfo/IGV_2.1.23/igv.sh"
+  "~/IGV/igv.sh"
   "Full path specification of the igv.sh file."
   :group 'igv :type 'string)
 
-(defvar igv-connection)
+(defcustom igv-search-location-function
+  'igv-search-location-vcf
+  "The function defined in `igv-search-location-function' is used by `igv-goto' to guess location definitions near point.  This function takes no argument and must return nil if no location is found, or a string with location of type \"chr1:4567777\" on success.  Two location-search functions are defined in this package: `igv-search-location-vcf' returns the location of the current line in a vcf file; `igv-search-location-backward' detects and returns locations of type \"chr1:nnnnnn-nnnnnn\" before point."
+  :group 'igv :type 'function)
 
-(setq igv-connection (make-network-process :name "igv" :host igv-host :service igv-port))
+(defvar igv-connection nil
+  "Holds the current igv connection object.")
+
+(defun igv-filter (process output)
+  "Get answer from last command sent to igv PROCESS.
+IGV does not give informative OUTPUT for most of the
+commands.  E.g. after loading an existing file that does not
+correspond to a track, IGV still answers with \"OK\"."
+  (unless (string= output "OK\n")
+    (error output)))
 
 (defun igv-start ()
   "Start the IGV process."
@@ -60,60 +75,91 @@
       (string= (process-status igv-connection) "open")
     nil))
 
+;;; functions that search for a location near point
+(defvar igv-vcf-re
+  (rx (group line-start
+	     (zero-or-one "chr")
+	     (or (: "1" (any "0-9"))
+		 (: "2" (any "0-2"))
+		 (any "1-9MXY")))
+      space
+      (group word-start
+	     (any "1-9")
+	     (zero-or-more digit)
+	     word-end)))
+
+(defun igv-search-location-vcf ()
+  "Search for a chromosome location in a vcf file."
+  (interactive)
+  (save-excursion
+    (beginning-of-line)
+    (when (re-search-forward igv-vcf-re (point-at-eol) t)
+      (format "%s:%s" (match-string-no-properties 1) (match-string-no-properties 2)))))
+
+(defvar igv-search-location 'igv-search-location-vcf)
+
+(defvar igv-location-regexp
+  (rx word-start
+      (zero-or-one "chr")
+      (any "12MXY")
+      (zero-or-one digit)
+      ":"
+      (one-or-more (any "0-9,"))
+      (opt "-"
+	   (one-or-more (any "0-9,")))
+      word-end))
+
+(defun igv-search-location-backward ()
+  "Search backward for the regular expression `igv-location-regexp' and return the matching string."
+  (save-excursion
+    (skip-chars-forward "chrMXY0-9:,")
+    (when (re-search-backward igv-location-regexp (point-at-bol) t)
+      (match-string-no-properties 0))))
+
+
 (defun igv-connect ()
   "Connect Emacs to an existing IGV process."
   (interactive)
   (condition-case err
       (if (igv-check-connection)
 	  igv-connection
-	(setq igv-connection (make-network-process :name "igv" :host igv-host :service igv-port)))
+	(setq igv-connection (make-network-process :name "igv"
+						   :host igv-host
+						   :service igv-port
+						   ;; :filter 'igv-filter
+						   :buffer "*igv-process*")))
     (file-error
-     (message "A connection to the server cannot be opened. Please, check that IGV is running."))))
+     (error "A connection to the server cannot be opened.
+     Please, check that IGV is running or run `igv-start'"))))
 
 (defun igv-send (str)
   "Helper function to send messages to IGV.
-STR is a string."
+STR is a string without trailing newline."
   (cond ((igv-check-connection)
-	 (process-send-string igv-connection str)
+	 (process-send-string igv-connection (concat str "\n"))
 	 (message str))
-	(t (error "no connection established"))))
+	(t (error "No connection established.  Please run `igv-connect' first"))))
 
-(defun igv-goto ()
-  "Goto location at point."
-  (interactive)
-  (save-excursion
-    (let ((cur (point))
-          (beg nil)
-          (end nil)
-          (address nil))
-      (progn
-	;; move point to an hypotethical beginning of an address
-	(skip-chars-backward "chrMXY0-9:,")
-	(setq beg (point))
-	(setq end (re-search-forward "chr[0-9XMY]+:[0-9,]+"))
-	(when (>= (point) cur)
-	  (setq address (buffer-substring-no-properties beg end))
-	  (igv-send (format "goto %s\n" address)))))))
+(defun read-string-with-default (prompt default)
+  "PROMPT is a string like \"Enter file (%s):\".
+`%s' will be substituted by DEFAULT if not nil.
+read-string will be called with the modified prompt and default
+value."
+  (let ((str (if default (substring-no-properties default) "")))
+    (read-string (format prompt str) nil nil str)))
 
-(defvar-local igv-re "\\(^\\|\\W+\\)\\(\\(chr\\)?[12MXY][0-9]?:[0-9,]+\\(-[0-9,]+\\)?\\)\\(\\W+\\|$\\)")
+(defun igv-goto (location)
+  "Set position of IGV to LOCATION."
+  (interactive
+   (list (read-string-with-default "Enter a location (%s):" (funcall igv-search-location))))
+  (igv-send (format "goto %s" location)))
 
-(defun igv-last-location ()
-  "Search backward for a location."
-  (interactive)
-  (save-excursion
-    ;; finish this tomorrow!
-    (skip-chars-forward "chrMXY0-9:,")
-    (re-search-backward igv-re (point-at-bol))
-    (message (match-string-no-properties 2))))
-
-
-;; (message (format "//variation[@vid=\'%s\']" str)))))))
-
-(defun igv-load-file (filename)
-  "Load a .bam file into IGV.
-FILENAME is the path of bam file."
-  (interactive "f")
-  (igv-send (format "load %s\n" filename)))
+(defun igv-load-file (fname)
+  "Load a track file (e.g. .bam) into IGV.
+FNAME is the path of file."
+  (interactive
+   (list (read-string-with-default "Enter filename (%s): " (thing-at-point 'filename))))
+  (igv-send (format "load %s" fname)))
 
 (defun igv-sort ()
   "Sort current IGV track by position."
@@ -123,39 +169,32 @@ FILENAME is the path of bam file."
 (defun igv-load-url (url)
   "Open a remote url.
 URL is an address pointing to a .bam file."
-  (interactive "r")
-  (igv-send (format "load %s\n" url)))
-
-(defun igv-load-url-at-point ()
-  "Open url at point."
-  (interactive)
-  (let ((f (thing-at-point 'url)))
-    (if f
-	(igv-send (format "load %s\n" f))
-      (error "malformed url"))))
-
-(defun igv-load-file-at-point ()
-  "Load the bam file at point into IGV."
-  (interactive)
-  (igv-load-file (thing-at-point 'filename)))
+  (interactive
+   (list (read-string-with-default "Enter url (%s):" (thing-at-point 'url))))
+  (igv-send (format "load %s" url)))
 
 (defun igv-set-snapshot-directory (dir)
-  "Set directory "
+  "Set the directory DIR where snapshots of IGV will be saved."
   (interactive "D")
-  (igv-send (format "snapshotDirectory %s\n" dir)))
+  (igv-send (format "snapshotDirectory %s" dir)))
 
 (defun igv-snapshot (filename)
   "Take a snapshot of the current portview.
 FILENAME is the path where the snapshot will be saved."
   (interactive "F")
-  (igv-send (format "snapshot %s\n" filename)))
+  (igv-send (format "snapshot %s" filename)))
 
 (define-minor-mode igv-mode
-  "toggle igv-mode"
+  "`igv-start' starts a IGV instance by calling the executable file at `igv-path'.
+`igv-connect' establish connection between Emacs and IGV.
+`igv-load-file' loads a file into IGV.
+`igv-goto' sets IGV position.
+`igv-snapshot' take a snapshot of the current IGV portview.
+"
   nil
-  :keymap
-  '(([C-c u] . igv-load-url-at-point)
-    ([C-c g] . igv-goto))
+  :keymap '(([C-c u] . igv-load-url)
+	    ([C-c f] . igv-load-file)
+	    ([C-c g] . igv-goto))
   :group 'igv)
 
 (provide 'igv)
