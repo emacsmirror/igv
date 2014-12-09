@@ -46,9 +46,9 @@
   "Full path specification of the igv.sh file."
   :group 'igv :type 'string)
 
-(defcustom igv-search-location-function
+(defcustom igv-search-location
   'igv-search-location-vcf
-  "The function defined in `igv-search-location-function' is used by `igv-goto' to guess location definitions near point.  This function takes no argument and must return nil if no location is found, or a string with location of type \"chr1:4567777\" on success.  Two location-search functions are defined in this package: `igv-search-location-vcf' returns the location of the current line in a vcf file; `igv-search-location-backward' detects and returns locations of type \"chr1:nnnnnn-nnnnnn\" before point."
+  "The function defined in `igv-search-location' is used by `igv-goto' to guess location definitions near point.  The function must take no argument and must return nil if no location is found, or a string with location of type \"chr1:nnnnnnn\" or \"chr1:nnnnnn-mmmmmm\" on success.  Two location-search functions are defined in this package: `igv-search-location-vcf' returns the location of the current line in a vcf file; `igv-search-location-backward' detects and returns locations of type \"chr1:nnnnnn-nnnnnn\" before point."
   :group 'igv :type 'function)
 
 (defvar igv-connection nil
@@ -184,6 +184,22 @@ FILENAME is the path where the snapshot will be saved."
   (interactive "F")
   (igv-send (format "snapshot %s" filename)))
 
+(defvar igv-command-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map "f" 'igv-load-file)
+    (define-key map "g" 'igv-goto)
+    (define-key map "u" 'igv-load-url)
+    (define-key map "s" 'igv-snapshot)
+    (define-key map "d" 'igv-set-snapshot-directory)
+    map))
+
+(defvar igv-keymap-prefix (kbd "C-c i"))
+
+(defvar igv-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map igv-keymap-prefix igv-command-map)
+    map))
+
 (define-minor-mode igv-mode
   "`igv-start' starts a IGV instance by calling the executable file at `igv-path'.
 `igv-connect' establish connection between Emacs and IGV.
@@ -192,10 +208,9 @@ FILENAME is the path where the snapshot will be saved."
 `igv-snapshot' take a snapshot of the current IGV portview.
 "
   nil
-  :keymap '(([C-c u] . igv-load-url)
-	    ([C-c f] . igv-load-file)
-	    ([C-c g] . igv-goto))
-  :group 'igv)
+  :keymap igv-mode-map
+  :group 'igv
+  :lighter " IGV")
 
 (provide 'igv)
 
