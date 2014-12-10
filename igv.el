@@ -20,7 +20,7 @@
 
 ;;; Commentary:
 ;; The igv package provides a minor mode to control remotely an
-;; instance of Interactive Genomics Viewer (IGV).  It can load a track
+;; instance of Integrative Genomics Viewer (IGV).  It can load a track
 ;; file and position IGV at a specified location without leaving
 ;; Emacs.
 
@@ -67,6 +67,7 @@ correspond to a track, IGV still answers with \"OK\"."
   (unless (string= output "OK\n")
     (error output)))
 
+;;;###autoload
 (defun igv-start ()
   "Start the IGV process."
   (interactive)
@@ -82,6 +83,7 @@ correspond to a track, IGV still answers with \"OK\"."
       (string= (process-status igv-connection) "open")
     nil))
 
+;;;###autoload
 (defun igv-connect ()
   "Connect Emacs to an existing IGV process."
   (interactive)
@@ -114,7 +116,7 @@ HISTORY is the variable where specific history will be recorded."
   (let ((str (if default (substring-no-properties default) "")))
     (read-string (format prompt str) nil history str)))
 
-;;; functions that search for a location near point
+;;; functions that search for a chromosome location near point
 (defvar igv-vcf-re
   (rx (group line-start
 	     (zero-or-one "chr")
@@ -212,7 +214,7 @@ FILENAME is the path where the snapshot will be saved."
 
 (define-minor-mode igv-mode
   "`igv-start' starts a IGV instance by calling the executable file at `igv-path'.
-`igv-connect' establish connection between Emacs and IGV.
+`igv-connect' establishes connection between Emacs and IGV.
 `igv-load-file' loads a file into IGV.
 `igv-goto' sets IGV position.
 `igv-snapshot' take a snapshot of the current IGV portview.
