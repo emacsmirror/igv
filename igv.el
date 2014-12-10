@@ -44,15 +44,21 @@
 (defcustom igv-path
   "~/IGV/igv.sh"
   "Full path specification of the igv.sh file."
-  :group 'igv :type 'string)
+  :group 'igv :type 'file)
 
 (defcustom igv-search-location
   'igv-search-location-vcf
-  "The function defined in `igv-search-location' is used by `igv-goto' to guess location definitions near point.  The function must take no argument and must return nil if no location is found, or a string with location of type \"chr1:nnnnnnn\" or \"chr1:nnnnnn-mmmmmm\" on success.  Two location-search functions are defined in this package: `igv-search-location-vcf' returns the location of the current line in a vcf file; `igv-search-location-backward' detects and returns locations of type \"chr1:nnnnnn-nnnnnn\" before point."
+  "The function specified in igv-search-location is used by `igv-goto' to guess chromosomal locations near point.
+The function must take no argument and must return nil if no location is found, or a string with location of type
+\"chr1:nnnnnnn\" or \"chr1:nnnnnn-mmmmmm\" on success.  Two location-search functions are defined in this package:
+`igv-search-location-vcf' returns the location of the current line in a vcf file;
+`igv-search-location-backward' detects and returns locations of type \"chr1:nnnnnn-nnnnnn\" before point."
   :group 'igv :type 'function)
 
 (defvar igv-connection nil
   "Holds the current igv connection object.")
+
+(defvar igv-location-history nil)
 
 (defun igv-filter (process output)
   "Get answer from last command sent to igv PROCESS.
@@ -67,13 +73,47 @@ correspond to a track, IGV still answers with \"OK\"."
   (interactive)
   (if (process-live-p "igv-process")
       (message "igv already started")
-    (start-process "igv-process" "igv-output" igv-path)))
+    (if (not (file-executable-p igv-path))
+	(error (format "The file specified in igv-path does not exist or is not executable"))
+     (start-process "igv-process" "igv-output" igv-path))))
 
 (defun  igv-check-connection ()
   "Check that IGV connection is alive."
   (if igv-connection
       (string= (process-status igv-connection) "open")
     nil))
+
+(defun igv-connect ()
+  "Connect Emacs to an existing IGV process."
+  (interactive)
+  (condition-case err
+      (if (igv-check-connection)
+	  igv-connection
+	(setq igv-connection (make-network-process :name "igv"
+						   :host igv-host
+						   :service igv-port
+						   ;; :filter 'igv-filter
+						   :buffer "*igv-process*")))
+    (file-error
+     (error "A connection to the server cannot be opened.
+     Please, check that IGV is running or run `igv-start'"))))
+
+(defun igv-send (str)
+  "Helper function to send messages to IGV.
+STR is a string without trailing newline."
+  (cond ((igv-check-connection)
+	 (process-send-string igv-connection (concat str "\n"))
+	 (message str))
+	(t (error "No connection established.  Please run `igv-connect' first"))))
+
+(defun read-string-with-default (prompt default &optional history)
+  "PROMPT is a string like \"Enter file (%s):\".
+`%s' will be substituted by DEFAULT if not nil.
+read-string will be called with the modified prompt and default
+value.
+HISTORY is the variable where specific history will be recorded."
+  (let ((str (if default (substring-no-properties default) "")))
+    (read-string (format prompt str) nil history str)))
 
 ;;; functions that search for a location near point
 (defvar igv-vcf-re
@@ -116,42 +156,10 @@ correspond to a track, IGV still answers with \"OK\"."
     (when (re-search-backward igv-location-regexp (point-at-bol) t)
       (match-string-no-properties 0))))
 
-
-(defun igv-connect ()
-  "Connect Emacs to an existing IGV process."
-  (interactive)
-  (condition-case err
-      (if (igv-check-connection)
-	  igv-connection
-	(setq igv-connection (make-network-process :name "igv"
-						   :host igv-host
-						   :service igv-port
-						   ;; :filter 'igv-filter
-						   :buffer "*igv-process*")))
-    (file-error
-     (error "A connection to the server cannot be opened.
-     Please, check that IGV is running or run `igv-start'"))))
-
-(defun igv-send (str)
-  "Helper function to send messages to IGV.
-STR is a string without trailing newline."
-  (cond ((igv-check-connection)
-	 (process-send-string igv-connection (concat str "\n"))
-	 (message str))
-	(t (error "No connection established.  Please run `igv-connect' first"))))
-
-(defun read-string-with-default (prompt default)
-  "PROMPT is a string like \"Enter file (%s):\".
-`%s' will be substituted by DEFAULT if not nil.
-read-string will be called with the modified prompt and default
-value."
-  (let ((str (if default (substring-no-properties default) "")))
-    (read-string (format prompt str) nil nil str)))
-
 (defun igv-goto (location)
   "Set position of IGV to LOCATION."
   (interactive
-   (list (read-string-with-default "Enter a location (%s):" (funcall igv-search-location))))
+   (list (read-string-with-default "Enter a location (%s):" (funcall igv-search-location) 'igv-location-history)))
   (igv-send (format "goto %s" location)))
 
 (defun igv-load-file (fname)
@@ -175,13 +183,13 @@ URL is an address pointing to a .bam file."
 
 (defun igv-set-snapshot-directory (dir)
   "Set the directory DIR where snapshots of IGV will be saved."
-  (interactive "D")
+  (interactive "DEnter snapshot directory: ")
   (igv-send (format "snapshotDirectory %s" dir)))
 
 (defun igv-snapshot (filename)
   "Take a snapshot of the current portview.
 FILENAME is the path where the snapshot will be saved."
-  (interactive "F")
+  (interactive "FEnter file name: ")
   (igv-send (format "snapshot %s" filename)))
 
 (defvar igv-command-map
