@@ -19,32 +19,30 @@
 
 
 ;;; Commentary:
-;; The igv package allows to control remotely an instance of
-;; Interactive Genomics Viewer (IGV).  It can load a track file and position
-;; IGV at a specified location without leaving Emacs.
+;; The igv package provides a minor mode to control remotely an
+;; instance of Interactive Genomics Viewer (IGV).  It can load a track
+;; file and position IGV at a specified location without leaving
+;; Emacs.
 
 ;;; Code:
 
 (require 'rx)
 
-(defgroup igv nil
-  "Options to customize IGV interaction")
-
 (defcustom igv-port
   60151
   "IGV port."
-  :group 'igv
+  :group 'igv-mode
   :type 'integer)
 
 (defcustom igv-host
   "127.0.0.1"
   "IGV address."
-  :group 'igv :type 'string)
+  :group 'igv-mode :type 'string)
 
 (defcustom igv-path
   "~/IGV/igv.sh"
-  "Full path specification of the igv.sh file."
-  :group 'igv :type 'file)
+  "Full path specification of the IGV launch script."
+  :group 'igv-mode :type 'file)
 
 (defcustom igv-search-location
   'igv-search-location-vcf
@@ -53,14 +51,15 @@ The function must take no argument and must return nil if no location is found, 
 \"chr1:nnnnnnn\" or \"chr1:nnnnnn-mmmmmm\" on success.  Two location-search functions are defined in this package:
 `igv-search-location-vcf' returns the location of the current line in a vcf file;
 `igv-search-location-backward' detects and returns locations of type \"chr1:nnnnnn-nnnnnn\" before point."
-  :group 'igv :type 'function)
+  :group 'igv-mode :type 'function)
+
 
 (defvar igv-connection nil
   "Holds the current igv connection object.")
 
 (defvar igv-location-history nil)
 
-(defun igv-filter (process output)
+(defun igv-filter (process output)	;not used
   "Get answer from last command sent to igv PROCESS.
 IGV does not give informative OUTPUT for most of the
 commands.  E.g. after loading an existing file that does not
@@ -192,6 +191,7 @@ FILENAME is the path where the snapshot will be saved."
   (interactive "FEnter file name: ")
   (igv-send (format "snapshot %s" filename)))
 
+
 (defvar igv-command-map
   (let ((map (make-sparse-keymap)))
     (define-key map "f" 'igv-load-file)
@@ -201,7 +201,9 @@ FILENAME is the path where the snapshot will be saved."
     (define-key map "d" 'igv-set-snapshot-directory)
     map))
 
-(defvar igv-keymap-prefix (kbd "C-c i"))
+;; (defvar igv-keymap-prefix (kbd "C-c i"))
+
+(defvar igv-keymap-prefix  (kbd "C-c i")  "Prefix key of igv-mode.")
 
 (defvar igv-mode-map
   (let ((map (make-sparse-keymap)))
@@ -217,7 +219,6 @@ FILENAME is the path where the snapshot will be saved."
 "
   nil
   :keymap igv-mode-map
-  :group 'igv
   :lighter " IGV")
 
 (provide 'igv)
